@@ -76,19 +76,26 @@ def cnot_ij(i,j,n):
     return op1+op2+op3+op4
 
 class mbqc_env(gym.Env):
+    """
+    This class is the environment used by the RL agents to interact with. The important methods are __init__(), step(), and reset(). These     correspond to the initialization of the quantum resource state, the single-qubit measurements, and the reset of the environment 
+    respectively  
+    """
     metadata = {'render.modes': ['human']}
     
-    def __init__(self, n_qubits, width, graph, flow, unitary, noise=0, noise_type="random" ,test_fidelity=False, init_state_random = True):
+    def __init__(self, n_qubits, width, graph, flow, unitary, noise=0, noise_type="random" ,test_fidelity=False, init_state_random = True, input_state_indxs = [-1]):
         """
         n_qubits: number of qubits that are measured
         width: width of cluster state
         graph: graph from networkx defining the resource state
-        flow: function that defines the flow on the graph
+        flow: it is a function that defines the flow on the graph
         unitary: gate that we want to learn to implement
         noise: noise strength
         noise_type: can be "random", "bitflip", or "none"
         test_fidelity: if true, it calculates the fidelity of a circuit with no noise
         init_state_random = if true, initial state is random, if false, initial state is |0>^{\otimes n}
+        input_states_indxs = if its [-1], the input state will be located in first (width)-th nodes and will use an
+                                extra qubit located in node (width+1), otherwise, the first (width) elements of the list
+                                will correspond to the input state and the (width+1) element to the extra ancilla used.
         """
         self.n_qubits = n_qubits
         self.width = width
@@ -110,6 +117,7 @@ class mbqc_env(gym.Env):
         self.state = -4*np.ones(self.n_qubits)
         self.total_measurements = self.n_qubits
         self.measurements_left = self.n_qubits
+        
         
         q_zeros = 1
         for i in range(self.width):
@@ -140,38 +148,56 @@ class mbqc_env(gym.Env):
 
         self.final_qstate_test = self.pure2density(self.unitary@st)
 
-        subgr = self.graph.subgraph(list(range(self.width+1)))
-        
-        self.qstate = self.pure2density(self.graph_with_multiple_inputs(subgr, inputstates=st, width=self.width))
+        if input_state_indxs == [-1]:
+            self.input_state_indices = list(range(self.width+1))
+        else:
+            self.input_state_indices = input_state_indxs
 
+        subgr = self.graph.subgraph(self.input_state_indices).copy()
+        mapping = {nod:idx for idx,nod in enumerate(self.input_state_indices)}
+        subgr = nx.relabel_nodes(subgr, mapping)
+
+        self.current_simulated_nodes = np.array(self.input_state_indices)
+        self.qstate = self.pure2density(self.graph_with_multiple_inputs(subgr, inputstates=st, width=self.width))
 
     def step(self, action):
         """
         Step function with the convention of the gym library
         It measures the current qubit with an angle of (action)
         """
-        current_measurement = self.total_measurements - self.measurements_left
+        
+        current_measurement = np.min(self.current_simulated_nodes)
         self.state[current_measurement] = action[0]
         self.measurements_left -= 1
-        self.qstate, outcome = self.measure_angle(self.qstate, action[0] ,0)
-        
+        qubit_to_measure = np.argmin(self.current_simulated_nodes)
+        self.qstate, outcome = self.measure_angle(self.qstate, action[0] , qubit_to_measure)
+           
         if outcome == 1:
             fi = self.flow(current_measurement)
-            self.qstate = self.arbitrary_qubit_gate(sx,fi-current_measurement,self.width+1)@self.qstate@np.conj(self.arbitrary_qubit_gate(sx,fi-current_measurement,self.width+1).T)
+            modified_qubit  = np.where(np.array(self.current_simulated_nodes)==fi)[0][0]
+            self.qstate = self.arbitrary_qubit_gate(sx,modified_qubit,self.width+1)@self.qstate@np.conj(self.arbitrary_qubit_gate(sx,modified_qubit,self.width+1).T)
             
             for ne in self.graph.neighbors(fi):
-                if ne<fi and ne!=current_measurement:
+                if ne in self.current_simulated_nodes and ne!=current_measurement:
                     self.qstate = self.arbitrary_qubit_gate(sz,ne-current_measurement,self.width+1)@self.qstate@np.conj(self.arbitrary_qubit_gate(sz,ne-current_measurement,self.width+1).T)
             
+
+        self.qstate = self.partial_trace(self.qstate, [qubit_to_measure])
+        self.current_simulated_nodes = np.delete(self.current_simulated_nodes, np.where(self.current_simulated_nodes==current_measurement))
+        np.setdiff1d(self.current_simulated_nodes, current_measurement)
         
-        self.qstate = self.partial_trace(self.qstate, [0])
+        new_qubit_indx = self.flow(np.min(self.current_simulated_nodes))
+        self.current_simulated_nodes = np.append(self.current_simulated_nodes, [new_qubit_indx])
+        
+
         if self.measurements_left!=0:
             self.qstate = np.kron(self.qstate, self.pure2density(qubit_plus))
-            for ne in self.graph.neighbors(current_measurement+self.width+1):
-                if ne<current_measurement+self.width+1:
-                    cgate=self.controlled_z(self.width,ne-(current_measurement+1), self.width+1)
-                    self.qstate = cgate@self.qstate@np.conj(cgate.T)
-        
+            for ne in self.graph.neighbors(new_qubit_indx):
+                if ne in self.current_simulated_nodes:
+                    q1 = np.where(self.current_simulated_nodes==ne)
+                    q2 = np.where(self.current_simulated_nodes==new_qubit_indx)
+                    cgate=self.controlled_z(q1[0][0],q2[0][0], self.width+1)
+                    self.qstate = cgate@self.qstate@np.conj(cgate.T)      
         
         reward = 0 #fidelity
         
@@ -223,8 +249,15 @@ class mbqc_env(gym.Env):
             
         self.final_qstate_test = self.pure2density(self.unitary@st)
         
-        subgr = self.graph.subgraph(list(range(self.width+1)))
+
+        subgr = self.graph.subgraph(self.input_state_indices).copy()
+        mapping = {nod:idx for idx,nod in enumerate(self.input_state_indices)}
+        subgr = nx.relabel_nodes(subgr, mapping)
+
+        self.current_simulated_nodes = np.array(self.input_state_indices)
+            
         self.qstate = self.pure2density(self.graph_with_multiple_inputs(subgr, inputstates=st, width=self.width))
+        
         return self.state
         
     def render(self, mode='human', close=False):
@@ -366,4 +399,4 @@ class mbqc_env(gym.Env):
         return u
 
     def randomUnitary_closetoid(self,dim, t, n):
-        return brownian_circuit(dim,n, np.sqrt(1/(n*dim))*2*np.pi*t)
+        return self.brownian_circuit(dim,n, np.sqrt(1/(n*dim))*2*np.pi*t)
