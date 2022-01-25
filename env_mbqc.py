@@ -82,7 +82,7 @@ class mbqc_env(gym.Env):
     """
     metadata = {'render.modes': ['human']}
     
-    def __init__(self, n_qubits, width, graph, flow, unitary, noise=0, noise_type="random" ,test_fidelity=False, init_state_random = True, input_state_indxs = [-1]):
+    def __init__(self, n_qubits, width, graph, flow, unitary, noise=0, noise_type="random" ,test_fidelity=False, init_state_random = True, input_state_indxs = [-1], output_state_indxs=[-1]):
         """
         n_qubits: number of qubits that are measured
         width: width of cluster state
@@ -94,8 +94,10 @@ class mbqc_env(gym.Env):
         test_fidelity: if true, it calculates the fidelity of a circuit with no noise
         init_state_random = if true, initial state is random, if false, initial state is |0>^{\otimes n}
         input_states_indxs = if its [-1], the input state will be located in first (width)-th nodes and will use an
-                                extra qubit located in node (width+1), otherwise, the first (width) elements of the list
+                                extra qubit located in node (width+1). Otherwise, the first (width) elements of the list
                                 will correspond to the input state and the (width+1) element to the extra ancilla used.
+        output_states_indxs = if its [-1], the output state will be locateed in the last (width)-th nodes. Otherwise. the
+                                elements in this list will be the the index of the output state. 
         """
         self.n_qubits = n_qubits
         self.width = width
@@ -152,6 +154,11 @@ class mbqc_env(gym.Env):
             self.input_state_indices = list(range(self.width+1))
         else:
             self.input_state_indices = input_state_indxs
+           
+        if output_state_indxs ==[-1]:
+            self.output_state_indices = list(range(n_qubits, n_qubits+width))
+        else:
+            self.output_state_indices = output_state_indxs
 
         subgr = self.graph.subgraph(self.input_state_indices).copy()
         mapping = {nod:idx for idx,nod in enumerate(self.input_state_indices)}
@@ -169,6 +176,7 @@ class mbqc_env(gym.Env):
         current_measurement = np.min(self.current_simulated_nodes)
         self.state[current_measurement] = action[0]
         self.measurements_left -= 1
+        
         qubit_to_measure = np.argmin(self.current_simulated_nodes)
         self.qstate, outcome = self.measure_angle(self.qstate, action[0] , qubit_to_measure)
            
@@ -186,11 +194,17 @@ class mbqc_env(gym.Env):
         self.current_simulated_nodes = np.delete(self.current_simulated_nodes, np.where(self.current_simulated_nodes==current_measurement))
         np.setdiff1d(self.current_simulated_nodes, current_measurement)
         
-        new_qubit_indx = self.flow(np.min(self.current_simulated_nodes))
-        self.current_simulated_nodes = np.append(self.current_simulated_nodes, [new_qubit_indx])
         
+        new_qubit_indx = self.flow(np.min(self.current_simulated_nodes))
+        err_temp = False
+        if new_qubit_indx in self.current_simulated_nodes:
+            err_temp = True
+        else:
+            self.current_simulated_nodes = np.append(self.current_simulated_nodes, [new_qubit_indx])
 
         if self.measurements_left!=0:
+            if err_temp:
+                print("ERROR, CHECK FLOW?")
             self.qstate = np.kron(self.qstate, self.pure2density(qubit_plus))
             for ne in self.graph.neighbors(new_qubit_indx):
                 if ne in self.current_simulated_nodes:
@@ -201,7 +215,20 @@ class mbqc_env(gym.Env):
         
         reward = 0 #fidelity
         
-        if self.measurements_left == 0:
+        if self.measurements_left == 0:  
+            sorted_nodes = self.current_simulated_nodes.copy()
+            sorted_nodes.sort()
+            if (self.current_simulated_nodes==sorted_nodes).all():
+                pass
+            else:
+                sim_nodes = self.current_simulated_nodes.copy()
+                for n_iteret in range(1,len(sim_nodes)):
+                    ll = np.argmin(sim_nodes[:-n_iteret])
+                    sim_nodes[n_iteret], sim_nodes[ll+n_iteret] =sim_nodes[ll+n_iteret], sim_nodes[n_iteret]  
+                    swapgate = self.swap_ij(ll+n_iteret-1,n_iteret-1,len(sim_nodes))
+                    print(swapgate.shape)
+                    self.qstate =swapgate@self.qstate@np.conj(swapgate.T)
+            
             if not self.test_fidelity:
                 reward = self.fidelity(self.final_qstate_train, self.qstate)
             elif self.test_fidelity:
@@ -387,6 +414,30 @@ class mbqc_env(gym.Env):
             else:
                 op = np.kron(op, np.eye(2))
         return op
+    
+    def swap_ij(self,i,j,n):
+        """
+        Swaps qubit i with qubit j
+        """
+        op1,op2,op3,op4 = np.ones(4)
+        for k in range(n):
+            if k==i or k==j:
+                op1 = np.kron(op1,np.kron(np.array([1,0]).T, np.array([1,0])))
+                op4 = np.kron(op4,np.kron(np.array([0,1]).T, np.array([0,1])))
+            else:
+                op1 = np.kron(op1, np.eye(2))
+                op4 = np.kron(op4, np.eye(2))
+
+            if k == i:
+                op2 = np.kron(op2,np.kron(np.array([1,0]).T, np.array([0,1])))
+                op3 = np.kron(op3,np.kron(np.array([0,1]).T, np.array([1,0])))
+            elif k==j:
+                op2 = np.kron(op2,np.kron(np.array([0,1]).T, np.array([1,0])))
+                op3 = np.kron(op3,np.kron(np.array([1,0]).T, np.array([0,1])))
+            else:
+                op2 = np.kron(op2, np.eye(2))
+                op3 = np.kron(op3, np.eye(2))
+        return op1+op2+op3+op4
     
     def brownian_circuit(self,dim, n, dt):
         u = np.eye(dim)
