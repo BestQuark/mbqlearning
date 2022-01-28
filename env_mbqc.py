@@ -123,7 +123,7 @@ class mbqc_env(gym.Env):
         
         q_zeros = 1
         for i in range(self.width):
-            q_zeros = np.kron(q_zeros, q_zero)
+            q_zeros = np.kron(q_zeros,H@q_zero)
         
         if self.init_state_random:
             st = unitary_group.rvs(2**self.width)@q_zeros
@@ -159,6 +159,8 @@ class mbqc_env(gym.Env):
             self.output_state_indices = list(range(n_qubits, n_qubits+width))
         else:
             self.output_state_indices = output_state_indxs
+            
+        assert len(self.input_state_indices)==self.width+1, "ERROR WITH INPUT STATE INDICES"
 
         subgr = self.graph.subgraph(self.input_state_indices).copy()
         mapping = {nod:idx for idx,nod in enumerate(self.input_state_indices)}
@@ -179,9 +181,10 @@ class mbqc_env(gym.Env):
         
         qubit_to_measure = np.argmin(self.current_simulated_nodes)
         self.qstate, outcome = self.measure_angle(self.qstate, action[0] , qubit_to_measure)
-           
+
         if outcome == 1:
             fi = self.flow(current_measurement)
+            assert fi in self.current_simulated_nodes, "ERROR WITH FLOW"
             modified_qubit  = np.where(np.array(self.current_simulated_nodes)==fi)[0][0]
             self.qstate = self.arbitrary_qubit_gate(sx,modified_qubit,self.width+1)@self.qstate@np.conj(self.arbitrary_qubit_gate(sx,modified_qubit,self.width+1).T)
             
@@ -192,14 +195,14 @@ class mbqc_env(gym.Env):
 
         self.qstate = self.partial_trace(self.qstate, [qubit_to_measure])
         self.current_simulated_nodes = np.delete(self.current_simulated_nodes, np.where(self.current_simulated_nodes==current_measurement))
-        np.setdiff1d(self.current_simulated_nodes, current_measurement)
+        #np.setdiff1d(self.current_simulated_nodes, current_measurement)
         
         
         new_qubit_indx = self.flow(np.min(self.current_simulated_nodes))
         err_temp = False
         if new_qubit_indx in self.current_simulated_nodes:
             err_temp = True
-        else:
+        elif new_qubit_indx in list(self.graph.nodes()):
             self.current_simulated_nodes = np.append(self.current_simulated_nodes, [new_qubit_indx])
 
         if self.measurements_left!=0:
@@ -208,9 +211,10 @@ class mbqc_env(gym.Env):
             self.qstate = np.kron(self.qstate, self.pure2density(qubit_plus))
             for ne in self.graph.neighbors(new_qubit_indx):
                 if ne in self.current_simulated_nodes:
-                    q1 = np.where(self.current_simulated_nodes==ne)
-                    q2 = np.where(self.current_simulated_nodes==new_qubit_indx)
-                    cgate=self.controlled_z(q1[0][0],q2[0][0], self.width+1)
+                    q1 = np.where(self.current_simulated_nodes==ne)[0][0]
+                    q2 = np.where(self.current_simulated_nodes==new_qubit_indx)[0][0]
+                    #print("q1 and q2:", q1, q2)
+                    cgate=self.controlled_z(q1,q2, self.width+1)
                     self.qstate = cgate@self.qstate@np.conj(cgate.T)      
         
         reward = 0 #fidelity
@@ -225,8 +229,8 @@ class mbqc_env(gym.Env):
                 for n_iteret in range(1,len(sim_nodes)):
                     ll = np.argmin(sim_nodes[:-n_iteret])
                     sim_nodes[n_iteret], sim_nodes[ll+n_iteret] =sim_nodes[ll+n_iteret], sim_nodes[n_iteret]  
-                    swapgate = self.swap_ij(ll+n_iteret-1,n_iteret-1,len(sim_nodes))
-                    print(swapgate.shape)
+                    #print("ll+n_iteret-1:", ll+n_iteret-1, "\nn_iteret:", n_iteret, "\nlensimnodes", len(sim_nodes))
+                    swapgate = self.swap_ij(ll+n_iteret-1,n_iteret,len(sim_nodes))
                     self.qstate =swapgate@self.qstate@np.conj(swapgate.T)
             
             if not self.test_fidelity:
@@ -252,7 +256,7 @@ class mbqc_env(gym.Env):
         
         q_zeros = 1
         for i in range(self.width):
-            q_zeros = np.kron(q_zeros, q_zero)
+            q_zeros = np.kron(q_zeros, H@q_zero)
         
         if self.init_state_random:
             st = unitary_group.rvs(2**self.width)@q_zeros
@@ -295,6 +299,7 @@ class mbqc_env(gym.Env):
         Controlled z gate between qubits i and j. 
         n is the total number of qubits
         """
+        assert i<n and j<n
         op1, op2 = 1, 2
         for k in range(0,n):
             op1 = np.kron(op1, np.eye(2))
@@ -419,21 +424,22 @@ class mbqc_env(gym.Env):
         """
         Swaps qubit i with qubit j
         """
+        assert i<n and j<n
         op1,op2,op3,op4 = np.ones(4)
         for k in range(n):
             if k==i or k==j:
-                op1 = np.kron(op1,np.kron(np.array([1,0]).T, np.array([1,0])))
-                op4 = np.kron(op4,np.kron(np.array([0,1]).T, np.array([0,1])))
+                op1 = np.kron(op1,np.kron(np.array([[1],[0]]).T, np.array([[1],[0]])))
+                op4 = np.kron(op4,np.kron(np.array([[0],[1]]).T, np.array([[0],[1]])))
             else:
                 op1 = np.kron(op1, np.eye(2))
                 op4 = np.kron(op4, np.eye(2))
 
             if k == i:
-                op2 = np.kron(op2,np.kron(np.array([1,0]).T, np.array([0,1])))
-                op3 = np.kron(op3,np.kron(np.array([0,1]).T, np.array([1,0])))
+                op2 = np.kron(op2,np.kron(np.array([[1],[0]]).T, np.array([[0],[1]])))
+                op3 = np.kron(op3,np.kron(np.array([[0],[1]]).T, np.array([[1],[0]])))
             elif k==j:
-                op2 = np.kron(op2,np.kron(np.array([0,1]).T, np.array([1,0])))
-                op3 = np.kron(op3,np.kron(np.array([1,0]).T, np.array([0,1])))
+                op2 = np.kron(op2,np.kron(np.array([[0],[1]]).T, np.array([[1],[0]])))
+                op3 = np.kron(op3,np.kron(np.array([[1],[0]]).T, np.array([[0],[1]])))
             else:
                 op2 = np.kron(op2, np.eye(2))
                 op3 = np.kron(op3, np.eye(2))
