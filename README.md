@@ -12,5 +12,3 @@ We use these functions and solve some examples in [qlearning-MBQC.ipynb](qlearni
 The functions that implement this agent and its environment are in [env_mbqc.py](env_mbqc.py).
 We use these functions and solve some examples in [ppo-MBQC.ipynb](ppo-MBQC.ipynb).
 
-## Report:
-A small report about this project can be found [here](https://www.overleaf.com/read/vrcfnkkfcvsc).
