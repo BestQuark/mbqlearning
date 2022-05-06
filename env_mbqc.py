@@ -190,9 +190,9 @@ class mbqc_env(gym.Env):
             
             for ne in self.graph.neighbors(fi):
                 if ne in self.current_simulated_nodes and ne!=current_measurement:
-                    self.qstate = self.arbitrary_qubit_gate(sz,ne-current_measurement,self.width+1)@self.qstate@np.conj(self.arbitrary_qubit_gate(sz,ne-current_measurement,self.width+1).T)
-            
-
+                    modified_qubit2  = np.where(np.array(self.current_simulated_nodes)==ne)[0][0]
+                    self.qstate = self.arbitrary_qubit_gate(sz,modified_qubit2,self.width+1)@self.qstate@np.conj(self.arbitrary_qubit_gate(sz,modified_qubit2,self.width+1).T)
+        
         self.qstate = self.partial_trace(self.qstate, [qubit_to_measure])
         self.current_simulated_nodes = np.delete(self.current_simulated_nodes, np.where(self.current_simulated_nodes==current_measurement))
         #np.setdiff1d(self.current_simulated_nodes, current_measurement)
