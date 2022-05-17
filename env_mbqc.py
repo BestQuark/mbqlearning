@@ -194,9 +194,7 @@ class mbqc_env(gym.Env):
                     self.qstate = self.arbitrary_qubit_gate(sz,modified_qubit2,self.width+1)@self.qstate@np.conj(self.arbitrary_qubit_gate(sz,modified_qubit2,self.width+1).T)
         
         self.qstate = self.partial_trace(self.qstate, [qubit_to_measure])
-        self.current_simulated_nodes = np.delete(self.current_simulated_nodes, np.where(self.current_simulated_nodes==current_measurement))
-        #np.setdiff1d(self.current_simulated_nodes, current_measurement)
-        
+        self.current_simulated_nodes = np.delete(self.current_simulated_nodes, np.where(self.current_simulated_nodes==current_measurement))        
         
         new_qubit_indx = self.flow(np.min(self.current_simulated_nodes))
         err_temp = False
@@ -213,7 +211,6 @@ class mbqc_env(gym.Env):
                 if ne in self.current_simulated_nodes:
                     q1 = np.where(self.current_simulated_nodes==ne)[0][0]
                     q2 = np.where(self.current_simulated_nodes==new_qubit_indx)[0][0]
-                    #print("q1 and q2:", q1, q2)
                     cgate=self.controlled_z(q1,q2, self.width+1)
                     self.qstate = cgate@self.qstate@np.conj(cgate.T)      
         
@@ -229,7 +226,6 @@ class mbqc_env(gym.Env):
                 for n_iteret in range(1,len(sim_nodes)):
                     ll = np.argmin(sim_nodes[:-n_iteret])
                     sim_nodes[n_iteret], sim_nodes[ll+n_iteret] =sim_nodes[ll+n_iteret], sim_nodes[n_iteret]  
-                    #print("ll+n_iteret-1:", ll+n_iteret-1, "\nn_iteret:", n_iteret, "\nlensimnodes", len(sim_nodes))
                     swapgate = self.swap_ij(ll+n_iteret-1,n_iteret,len(sim_nodes))
                     self.qstate =swapgate@self.qstate@np.conj(swapgate.T)
             

@@ -12,3 +12,7 @@ We use these functions and solve some examples in [qlearning-MBQC.ipynb](qlearni
 The functions that implement this agent and its environment are in [env_mbqc.py](env_mbqc.py).
 We use these functions and solve some examples in [ppo-MBQC.ipynb](ppo-MBQC.ipynb).
 
+
+### TODO:
+- [ ] Currently, the flow function should be defined in the output qubits to be something, but this is never used. Task: fix this such that a user can specify a function with the correct domain f: measured_qubits --> qubits. 
+
