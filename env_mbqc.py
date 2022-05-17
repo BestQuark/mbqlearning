@@ -182,7 +182,7 @@ class mbqc_env(gym.Env):
         qubit_to_measure = np.argmin(self.current_simulated_nodes)
         self.qstate, outcome = self.measure_angle(self.qstate, action[0] , qubit_to_measure)
 
-        if outcome == 1:
+        if outcome == 1 and (qubit_to_measure not in self.output_state_indices):
             fi = self.flow(current_measurement)
             assert fi in self.current_simulated_nodes, "ERROR WITH FLOW"
             modified_qubit  = np.where(np.array(self.current_simulated_nodes)==fi)[0][0]
@@ -196,12 +196,13 @@ class mbqc_env(gym.Env):
         self.qstate = self.partial_trace(self.qstate, [qubit_to_measure])
         self.current_simulated_nodes = np.delete(self.current_simulated_nodes, np.where(self.current_simulated_nodes==current_measurement))        
         
-        new_qubit_indx = self.flow(np.min(self.current_simulated_nodes))
         err_temp = False
-        if new_qubit_indx in self.current_simulated_nodes:
-            err_temp = True
-        elif new_qubit_indx in list(self.graph.nodes()):
-            self.current_simulated_nodes = np.append(self.current_simulated_nodes, [new_qubit_indx])
+        if (qubit_to_measure not in self.output_state_indices):
+            new_qubit_indx = self.flow(np.min(self.current_simulated_nodes))
+            if new_qubit_indx in self.current_simulated_nodes:
+                err_temp = True
+            elif new_qubit_indx in list(self.graph.nodes()):
+                self.current_simulated_nodes = np.append(self.current_simulated_nodes, [new_qubit_indx])
 
         if self.measurements_left!=0:
             if err_temp:
