@@ -196,14 +196,15 @@ class mbqc_env(gym.Env):
         self.qstate = self.partial_trace(self.qstate, [qubit_to_measure])
         self.current_simulated_nodes = np.delete(self.current_simulated_nodes, np.where(self.current_simulated_nodes==current_measurement))        
         
-        new_qubit_indx = self.flow(np.min(self.current_simulated_nodes))
         err_temp = False
-        if new_qubit_indx in self.current_simulated_nodes:
-            err_temp = True
-        elif new_qubit_indx in list(self.graph.nodes()):
-            self.current_simulated_nodes = np.append(self.current_simulated_nodes, [new_qubit_indx])
-
         if self.measurements_left!=0:
+            
+            new_qubit_indx = self.flow(np.min(self.current_simulated_nodes)) # block moved from outside into the if statement (Polina)
+            if new_qubit_indx in self.current_simulated_nodes:
+                err_temp = True
+            elif new_qubit_indx in list(self.graph.nodes()):
+                self.current_simulated_nodes = np.append(self.current_simulated_nodes, [new_qubit_indx])
+                
             if err_temp:
                 print("ERROR, CHECK FLOW?")
             self.qstate = np.kron(self.qstate, self.pure2density(qubit_plus))
